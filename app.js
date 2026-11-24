@@ -1,5 +1,5 @@
 'use strict';
-/* Our Bucket List: static PWA. The list and photos are encrypted on the phone (AES-GCM, key from the shared passcode)
+/* Our Bucket List v2: static PWA. The list and photos are encrypted on the phone (AES-GCM, key from the shared passcode)
    and synced through textdb.online, a free no-signup text store. The storage key is also derived from the passcode,
    so nothing in this public code says where the data lives or how to read it. */
 const API = 'https://textdb.online';
@@ -8,47 +8,36 @@ const SALT = 'our-bucket-list-v1', ITER = 310000;
 const POLL_MS = 12000, PHOTO_MAX = 180000; // stored text per photo, under textdb's 200k-character cap
 const $ = id => document.getElementById(id);
 const enc = new TextEncoder(), dec = new TextDecoder();
+const EMOJIS = ['🌌','✈️','🏔️','🌊','♨️','🍝','🍷','🎬','🎢','🎨','🐾','🎁','💞'];
 
-const CATS = [['🌌','Adventure'],['✈️','Travel'],['♨️','Relax'],['🍝','Food'],['🎬','Fun'],['💞','Us'],['🌋','Nature'],['🎁','Surprise']];
-const STARTERS = [
-  ['s01','🌌','See the Northern Lights together','Drive out of the city lights on a clear night'],
-  ['s02','💙','Spend a day at the Blue Lagoon',''],
-  ['s03','♨️','Sunset soak at Sky Lagoon',''],
-  ['s04','🖤','Walk on Reynisfjara black sand beach','Stay far from the waves!'],
-  ['s05','🍝','Cook a new dish together',''],
-  ['s06','⛰️','Hike up Esja',''],
-  ['s07','🚗','Golden Circle road trip','Þingvellir, Geysir and Gullfoss'],
-  ['s08','🐋','Whale watching from the Old Harbour',''],
-  ['s09','🌭','Bæjarins Beztu hot dogs at midnight',''],
-  ['s10','💧','Walk behind Seljalandsfoss',''],
-];
-
-/* ---------- small helpers ---------- */
 const b64 = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
 const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const rid = (n = 12) => b64(crypto.getRandomValues(new Uint8Array(n))).replace(/[^a-zA-Z0-9]/g, '').slice(0, n);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
-const fmtDate = s => { if (!s) return ''; const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
+const fmtDate = s => s ? new Date(s + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+const niceDate = s => s === today() ? 'Today' : fmtDate(s);
 const ICONS = {
-  list: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.1" fill="currentColor"/><circle cx="4.5" cy="12" r="1.1" fill="currentColor"/><circle cx="4.5" cy="18" r="1.1" fill="currentColor"/>',
   heart: '<path d="M12 20.3s-7.5-4.5-9.3-9.1C1.5 8 3.4 4.5 6.9 4.5c2 0 3.6 1.1 5.1 3 1.5-1.9 3.1-3 5.1-3 3.5 0 5.4 3.5 4.2 6.7-1.8 4.6-9.3 9.1-9.3 9.1z"/>',
   'heart-fill': '<path fill="currentColor" stroke="none" d="M12 20.3s-7.5-4.5-9.3-9.1C1.5 8 3.4 4.5 6.9 4.5c2 0 3.6 1.1 5.1 3 1.5-1.9 3.1-3 5.1-3 3.5 0 5.4 3.5 4.2 6.7-1.8 4.6-9.3 9.1-9.3 9.1z"/>',
   plus: '<path d="M12 5v14M5 12h14" stroke-width="2.4"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5" stroke-width="3"/>',
   camera: '<path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.7l1.4-2h4.8l1.4 2h1.7A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.5"/>',
+  cake: '<path d="M4.5 20h15v-6.5a2 2 0 0 0-2-2h-11a2 2 0 0 0-2 2z"/><path d="M4.5 15.5c1.3 1 2.6 1 3.8 0 1.3 1 2.6 1 3.7 0 1.3 1 2.6 1 3.8 0 1.2 1 2.5 1 3.7 0M12 11.5V8"/><path d="M12 3.5c.9 1 1.2 1.8 0 3-1.2-1.2-.9-2 0-3z" fill="currentColor"/>',
+  cal: '<rect x="4" y="5.5" width="16" height="14.5" rx="3"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
 };
 const icon = n => '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[n] || '') + '</svg>';
 function paintIcons(root = document) { root.querySelectorAll('i[data-ic]').forEach(i => { i.outerHTML = icon(i.dataset.ic); }); }
 function haptic() { try { $('hap').click(); } catch (e) {} try { navigator.vibrate && navigator.vibrate(8); } catch (e) {} }
-let toastT; function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
-function hearts(x, y, n = 14) {
-  const set = ['❤️','💕','💖','💗','✨'];
+let toastT; function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2000); }
+function hearts(x, y, n = 12) {
+  const set = ['❤️','💕','💗','✨'];
   for (let i = 0; i < n; i++) { const h = document.createElement('div'); h.className = 'hfx'; h.textContent = set[i % set.length];
-    h.style.left = (x - 11) + 'px'; h.style.top = (y - 11) + 'px';
-    const a = Math.random() * Math.PI * 2, d = 60 + Math.random() * 110;
-    h.style.setProperty('--dx', Math.cos(a) * d + 'px'); h.style.setProperty('--dy', (Math.sin(a) * d - 80) + 'px'); h.style.setProperty('--r', (Math.random() * 60 - 30) + 'deg');
-    h.style.animationDelay = (i * 25) + 'ms'; document.body.appendChild(h); setTimeout(() => h.remove(), 1700); }
+    h.style.left = (x - 10) + 'px'; h.style.top = (y - 10) + 'px';
+    const a = -Math.PI / 2 + (Math.random() - .5) * 2.2, d = 70 + Math.random() * 120;
+    h.style.setProperty('--dx', Math.cos(a) * d + 'px'); h.style.setProperty('--dy', Math.sin(a) * d + 'px'); h.style.setProperty('--r', (Math.random() * 50 - 25) + 'deg');
+    h.style.animationDelay = (i * 30) + 'ms'; document.body.appendChild(h); setTimeout(() => h.remove(), 1900); }
 }
 
 /* ---------- crypto ---------- */
@@ -100,14 +89,15 @@ async function compress(file) {
 /* ---------- data + sync ---------- */
 let DOC = { items: {} };
 const me = () => localStorage.getItem('bl.me') || '';
-function loadLocal() { try { DOC = JSON.parse(localStorage.getItem('bl.doc')) || { items: {} }; } catch (e) { DOC = { items: {} }; } if (!DOC.items) DOC.items = {}; }
+function loadLocal() { try { DOC = JSON.parse(localStorage.getItem('bl.doc')) || { items: {} }; } catch (e) { DOC = { items: {} }; } if (!DOC.items) DOC.items = {}; DOC = merge(DOC, { items: {} }); }
 function saveLocal() { localStorage.setItem('bl.doc', JSON.stringify(DOC)); }
 const queue = () => JSON.parse(localStorage.getItem('bl.pq') || '[]');
 const setQueue = q => localStorage.setItem('bl.pq', JSON.stringify(q));
 function canon(doc) { const o = {}; Object.keys(doc.items).sort().forEach(k => o[k] = doc.items[k]); return JSON.stringify(o); }
 function newer(a, b) { if (!a) return b; if (!b) return a; if (a.u !== b.u) return a.u > b.u ? a : b; return JSON.stringify(a) > JSON.stringify(b) ? a : b; }
-function merge(a, b) { const out = { items: {} }; new Set([...Object.keys(a.items || {}), ...Object.keys(b.items || {})]).forEach(k => out.items[k] = newer((a.items || {})[k], (b.items || {})[k])); return out; }
-function starters() { const d = { items: {} }; STARTERS.forEach(([id, e, t, n], i) => d.items[id] = { id, e, t, n, by: '', c: 1700000000000 - i, u: 1700000000000 + i, done: false }); return d; }
+// v1 seeded ten starter ideas (ids s01–s10, fixed timestamps). Untouched ones are dropped everywhere; edited ones stay.
+const isSeed = i => /^s\d\d$/.test(i.id) && i.u < 1700000001000 && !i.done;
+function merge(a, b) { const out = { items: {} }; new Set([...Object.keys(a.items || {}), ...Object.keys(b.items || {})]).forEach(k => { const it = newer((a.items || {})[k], (b.items || {})[k]); if (!isSeed(it)) out.items[k] = it; }); return out; }
 function touch(it) { it.u = Math.max(Date.now(), (it.u || 0) + 1); DOC.items[it.id] = it; saveLocal(); render(); sync(); }
 
 let syncing = false, again = false, online = true;
@@ -121,10 +111,9 @@ async function sync() {
     const txt = await rget(listKey());
     let remote = null;
     if (txt) { try { remote = JSON.parse(dec.decode(await decBytes(txt))); } catch (e) { throw new Error('cannot read list'); } }
-    let merged = merge(DOC, remote || { items: {} });
-    if (!remote && !Object.keys(merged.items).length) merged = starters();
+    const merged = merge(DOC, remote || { items: {} });
     const changedLocal = canon(merged) !== canon(DOC);
-    if (!remote || canon(merged) !== canon(remote)) await rput(listKey(), await encBytes(enc.encode(JSON.stringify(merged))));
+    if (remote ? canon(merged) !== canon(remote) : Object.keys(merged.items).length) await rput(listKey(), await encBytes(enc.encode(JSON.stringify(merged))));
     DOC = merged; saveLocal(); if (changedLocal) render();
     online = true; setSync('');
     keepAlive();
@@ -139,102 +128,139 @@ async function keepAlive() {
 }
 
 /* ---------- render ---------- */
-let filter = 'all', view = 'list';
+let view = 'list';
 const live = () => Object.values(DOC.items).filter(i => !i.del);
 function render() {
   const all = live(), todo = all.filter(i => !i.done).sort((a, b) => b.c - a.c), done = all.filter(i => i.done).sort((a, b) => (b.dd || '').localeCompare(a.dd || '') || b.u - a.u);
   const n = all.length, d = done.length;
-  $('sub').innerHTML = n ? `${todo.length} idea${todo.length === 1 ? '' : 's'} waiting · <b>${d} done</b>` : 'Add your first dream together';
-  $('heroT').textContent = d + ' done together';
-  $('heroS').textContent = !d ? 'Start with something small ✨' : d === n ? 'All of them! Add more dreams 🥹' : `${Math.round(d / n * 100)}% of our list · ${n - d} to go`;
-  $('ring').style.strokeDashoffset = 169.6 * (1 - (n ? d / n : 0));
-  // chips: only types in use
-  const used = [...new Set(todo.map(i => i.e))];
-  if (filter !== 'all' && !used.includes(filter)) filter = 'all';
-  $('chips').innerHTML = used.length > 1 ? ['all', ...used].map(e => `<button class="chip tap${filter === e ? ' on' : ''}" data-f="${esc(e)}">${e === 'all' ? 'All' : esc(e)}</button>`).join('') : '';
-  const shown = todo.filter(i => filter === 'all' || i.e === filter);
-  $('list').innerHTML = shown.length ? shown.map((i, k) => `<div class="item tap" data-id="${esc(i.id)}" style="animation-delay:${Math.min(k, 8) * 35}ms">
-      <div class="emo">${esc(i.e || '💞')}</div><div class="mid"><div class="tt">${esc(i.t)}</div>${i.n || i.by ? `<div class="nn">${esc(i.n || ('Added by ' + i.by))}</div>` : ''}</div>
-      <button class="check" data-done="${esc(i.id)}" aria-label="Mark done"></button></div>`).join('')
-    : `<div class="empty"><div class="big">💭</div>${todo.length ? 'Nothing here yet' : 'Everything is done!<br>Tap <b>+</b> to dream up more.'}</div>`;
-  $('sub2').innerHTML = d ? `<b>${d}</b> memor${d === 1 ? 'y' : 'ies'} made together` : '';
-  $('grid').innerHTML = d ? done.map((i, k) => `<button class="tile tap" data-view="${esc(i.id)}" style="animation-delay:${Math.min(k, 8) * 40}ms"><div class="ph">${esc(i.e || '💞')}${i.p ? `<img data-ph="${esc(i.p)}" alt="">` : ''}</div>
-      <div class="cap"><div class="tt">${esc(i.t)}</div><div class="dd">${esc(fmtDate(i.dd))}</div></div></button>`).join('')
-    : `<div class="empty" style="grid-column:1/-1"><div class="big">📸</div>Tick off an idea and add a photo.<br>Your memories show up here.</div>`;
-  $('grid').querySelectorAll('img[data-ph]').forEach(async im => { const u = await photoURL(im.dataset.ph); if (u) { im.onload = () => im.classList.add('ld'); im.src = u; } });
+  $('hello').hidden = n > 0; fabState(); $('prog').hidden = n === 0;
+  $('sub').textContent = !n ? 'Just the two of you ❤️' : todo.length ? `${todo.length} dream${todo.length === 1 ? '' : 's'} to go` + (d ? ` · ${d} done together` : '') : 'All done! Time to dream up more ✨';
+  $('barI').style.width = (n ? d / n * 100 : 0) + '%'; $('progT').textContent = d + ' / ' + n;
+  $('list').innerHTML = todo.map((i, k) => `<div class="item tap" data-id="${esc(i.id)}" role="button" style="animation-delay:${Math.min(k, 8) * 30}ms">
+      ${i.e ? `<span class="emo">${esc(i.e)}</span>` : ''}<div class="mid"><div class="tt">${esc(i.t)}</div>${i.by ? `<div class="by">${esc(i.by)}</div>` : ''}</div>
+      <span class="check" aria-label="Mark done"></span></div>`).join('')
+    + (n && !todo.length ? `<div class="soft-empty"><div class="big">🥹</div>You did everything on your list.<br>Tap <b>+</b> for the next dream.</div>` : '');
+  $('sub2').textContent = d ? `${d} memor${d === 1 ? 'y' : 'ies'} made together` : '';
+  $('wall').innerHTML = d ? done.map((i, k) => `<button class="mem${k === 0 ? ' hero' : ''}${i.p ? '' : ' nophoto'}" data-view="${esc(i.id)}" style="animation-delay:${Math.min(k, 8) * 45}ms">
+      ${i.p ? `<img data-ph="${esc(i.p)}" alt="">` : `<span class="noph"><i data-ic="camera"></i>Add photo</span>`}
+      <span class="cap"><div class="tt">${esc(i.e ? i.e + ' ' : '')}${esc(i.t)}</div><div class="dd">${esc(fmtDate(i.dd))}</div></span></button>`).join('')
+    : `<div class="soft-empty" style="grid-column:1/-1"><div class="big">📸</div>When you do something on your list,<br>tick it off with a photo of you two.<br>It shows up here.</div>`;
+  paintIcons($('wall'));
+  $('wall').querySelectorAll('img[data-ph]').forEach(async im => { const u = await photoURL(im.dataset.ph); if (u) { im.onload = () => im.classList.add('ld'); im.src = u; } });
 }
 
-/* ---------- sheets ---------- */
+/* ---------- our dates (yearly countdowns, Iceland time) ---------- */
+const DATES = [['Her birthday', '🎂', 4, 4], ["Gummi's birthday", '🎂', 11, 19], ['Our anniversary', '💞', 6, 12]];
+function icelandToday() { const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Atlantic/Reykjavik', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); const g = t => +p.find(x => x.type === t).value; return [g('year'), g('month'), g('day')]; }
+function countdowns() {
+  const [y, m, d] = icelandToday(), t0 = Date.UTC(y, m - 1, d);
+  return DATES.map(([name, e, mm, dd]) => { let t = Date.UTC(y, mm - 1, dd); if (t < t0) t = Date.UTC(y + 1, mm - 1, dd); return { name, e, days: Math.round((t - t0) / 864e5), when: new Date(t).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }) }; }).sort((a, b) => a.days - b.days);
+}
+function renderDates() {
+  $('dates').innerHTML = countdowns().map((c, k) => `<div class="dcard${k === 0 ? ' first' : ''}${c.days === 0 ? ' today' : ''}" style="animation-delay:${k * 60}ms"><span class="de">${c.e}</span>
+    <div class="dm"><div class="dn">${esc(c.name)}</div><div class="dw">${esc(c.when)}</div></div>
+    <div class="dc">${c.days === 0 ? '<b>Today! 🎉</b>' : c.days === 1 ? '<b>1</b><small>day · tomorrow</small>' : `<b>${c.days}</b><small>days</small>`}</div></div>`).join('');
+}
+
+/* ---------- sheets + keyboard ---------- */
 let openSheet = null;
-function sheet(id) { closeSheet(true); openSheet = $(id); $('dim').classList.add('on'); requestAnimationFrame(() => openSheet.classList.add('on')); }
-function closeSheet(quick) { if (!openSheet) return; openSheet.classList.remove('on'); $('dim').classList.remove('on'); document.activeElement && document.activeElement.blur && document.activeElement.blur(); openSheet = null; }
+function sheet(id) { if (openSheet) closeSheet(); openSheet = $(id); openSheet.scrollTop = 0; $('dim').classList.add('on'); requestAnimationFrame(() => openSheet.classList.add('on')); }
+function closeSheet() { if (!openSheet) return; openSheet.classList.remove('on'); $('dim').classList.remove('on'); const a = document.activeElement; a && a.blur && a.blur(); openSheet = null; }
 $('dim').onclick = () => closeSheet();
 document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => closeSheet());
-// swipe down to close
 document.querySelectorAll('.sheet').forEach(s => { let y0 = null, dy = 0;
-  s.addEventListener('touchstart', e => { y0 = s.scrollTop <= 0 ? e.touches[0].clientY : null; dy = 0; }, { passive: true });
+  s.addEventListener('touchstart', e => { y0 = s.scrollTop <= 0 && !e.target.closest('input,textarea') ? e.touches[0].clientY : null; dy = 0; }, { passive: true });
   s.addEventListener('touchmove', e => { if (y0 == null) return; dy = e.touches[0].clientY - y0; if (dy > 0) { s.style.transition = 'none'; s.style.transform = `translateY(${dy}px)`; } }, { passive: true });
   s.addEventListener('touchend', () => { s.style.transition = ''; s.style.transform = ''; if (y0 != null && dy > 110) closeSheet(); y0 = null; });
 });
+// keep sheets above the iOS keyboard
+if (window.visualViewport) { const vv = visualViewport; const f = () => { const kb = Math.max(0, innerHeight - vv.height - vv.offsetTop); document.documentElement.style.setProperty('--kb', kb + 'px'); document.querySelectorAll('.sheet').forEach(s => s.classList.toggle('kbd', kb > 80)); };
+  vv.addEventListener('resize', f); vv.addEventListener('scroll', f); }
 
-let editing = null, pickEmo = '🌌';
-function paintEmo() { $('eEmo').innerHTML = CATS.map(([e, l]) => `<button class="tap${e === pickEmo ? ' on' : ''}" data-e="${e}" aria-label="${l}">${e}</button>`).join(''); }
-$('eEmo').onclick = e => { const b = e.target.closest('[data-e]'); if (!b) return; pickEmo = b.dataset.e; haptic(); paintEmo(); };
+/* add / edit: iOS only opens the keyboard for a focus() inside the tap, so focus a proxy now and hand over after the slide-in */
+let editing = null, pickEmo = '';
+function paintEmo() { $('eEmo').innerHTML = EMOJIS.map(e => `<button class="tap${e === pickEmo ? ' on' : ''}" data-e="${e}">${e}</button>`).join(''); }
+['pointerdown', 'mousedown', 'touchstart'].forEach(ev => $('eEmo').addEventListener(ev, e => { if (e.target.closest('[data-e]') && e.cancelable && ev !== 'touchstart') e.preventDefault(); }, { passive: false })); // keep the keyboard up
+$('eEmo').onclick = e => { const b = e.target.closest('[data-e]'); if (!b) return; pickEmo = pickEmo === b.dataset.e ? '' : b.dataset.e; haptic(); paintEmo(); if (!editing) $('eName').focus({ preventScroll: true }); };
 function openEdit(it) {
-  editing = it || null; pickEmo = it ? it.e : '🌌'; if (it && !CATS.some(c => c[0] === it.e)) CATS.push([it.e, 'Custom']);
-  $('eTitle').textContent = it ? 'Edit idea' : 'New idea'; $('eSave').textContent = it ? 'Save' : 'Add to our list';
-  $('eName').value = it ? it.t : ''; $('eNote').value = it ? it.n || '' : ''; $('eDel').hidden = !it;
-  $('eMeta').textContent = it && it.by ? 'Added by ' + it.by : ''; paintEmo(); sheet('sEdit');
-  if (!it) setTimeout(() => $('eName').focus(), 350);
+  editing = it || null; pickEmo = it ? it.e || '' : '';
+  if (pickEmo && !EMOJIS.includes(pickEmo)) EMOJIS.unshift(pickEmo);
+  $('eTitle').textContent = it ? 'Edit' : 'New dream'; $('eSave').textContent = it ? 'Save' : 'Add';
+  $('eName').value = it ? it.t : ''; $('eNote').value = it ? it.n || '' : ''; $('eNote').hidden = !it; $('eDel').hidden = !it;
+  $('eSave').disabled = !$('eName').value.trim(); paintEmo();
+  $('kbProxy').focus(); sheet('sEdit');
+  setTimeout(() => { $('eName').focus({ preventScroll: true }); }, 60);
 }
-$('eSave').onclick = () => {
-  const t = $('eName').value.trim(); if (!t) { $('eName').parentNode.classList.add('shake'); setTimeout(() => $('eName').parentNode.classList.remove('shake'), 450); return; }
+$('eName').addEventListener('input', () => { $('eSave').disabled = !$('eName').value.trim(); });
+$('eName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveEdit(); } });
+$('eSave').onclick = () => saveEdit();
+function saveEdit() {
+  const t = $('eName').value.trim(); if (!t) return;
   const it = editing ? { ...editing } : { id: Date.now().toString(36) + rid(6), c: Date.now(), by: me(), done: false };
-  it.t = t; it.n = $('eNote').value.trim(); it.e = pickEmo; haptic(); closeSheet();
-  if (view !== 'list') go('list'); touch(it); if (!editing) toast('Added to your list 💕');
-};
-$('eDel').onclick = () => { if (!editing || !confirm('Delete "' + editing.t + '"?')) return; const it = { ...editing, del: true }; closeSheet(); touch(it); toast('Deleted'); };
+  it.t = t; it.e = pickEmo; if (editing) it.n = $('eNote').value.trim();
+  haptic(); closeSheet(); if (view !== 'list') go('list'); touch(it); if (!editing) toast('Added to our list 💕');
+}
+$('eDel').onclick = () => { if (!editing || !confirm('Delete "' + editing.t + '"?')) return; const it = { ...editing, del: true }; closeSheet(); touch(it); };
 
-let doneIt = null, doneBlob = null;
+/* complete with a photo */
+let doneIt = null, doneBlob = null, busyPhoto = false;
+function shotEmpty() { $('dShot').innerHTML = `<span class="cam">${icon('camera')}</span><b>Add a photo of you two</b><small>Take one or pick from your library</small><input type="file" accept="image/*" id="dFile">`; $('dFile').onchange = pickPhoto; }
+function shotShow(url) { $('dShot').innerHTML = `<img src="${url}" alt=""><span class="chg">Change</span><input type="file" accept="image/*" id="dFile">`; $('dFile').onchange = pickPhoto; }
+function setDate(v) { $('dDate').value = v; $('dDateT').textContent = niceDate(v); }
+$('dDate').onchange = () => setDate($('dDate').value || today());
+function doneBtn() { $('dSave').textContent = doneIt && doneIt.done ? 'Save' : (doneBlob || (doneIt && doneIt.p)) ? 'Save memory ❤️' : 'Mark as done'; $('dSave').classList.toggle('quiet', !doneBlob && !(doneIt && doneIt.p) && !(doneIt && doneIt.done)); }
 function openDone(it) {
-  doneIt = it; doneBlob = null; $('dName').textContent = (it.e || '') + ' ' + it.t; $('dDate').value = it.dd || today(); $('dNote').value = it.dn || '';
-  $('dSave').textContent = it.done ? 'Save' : 'Mark as done ❤️';
-  const ph = $('dPhoto'); ph.querySelector('img') && ph.querySelector('img').remove(); ph.querySelector('span').textContent = 'Add a photo';
-  if (it.p) photoURL(it.p).then(u => { if (u && doneIt === it) { const im = new Image(); im.src = u; ph.prepend(im); ph.querySelector('span').textContent = ''; } });
+  doneIt = it; doneBlob = null; $('dName').textContent = (it.e ? it.e + ' ' : '') + it.t;
+  $('dBy').textContent = it.by ? 'Added by ' + it.by : ''; $('dEdit').hidden = !!it.done;
+  setDate(it.dd || today()); $('dNote').value = it.dn || ''; shotEmpty(); doneBtn();
+  if (it.p) photoURL(it.p).then(u => { if (u && doneIt === it && !doneBlob) { shotShow(u); doneBtn(); } });
   sheet('sDone');
 }
-$('dFile').onchange = async () => {
-  const f = $('dFile').files[0]; $('dFile').value = ''; if (!f) return;
-  const ph = $('dPhoto'); ph.querySelector('span').textContent = 'Preparing…';
-  try { doneBlob = await compress(f); } catch (e) { doneBlob = null; ph.querySelector('span').textContent = "Couldn't use that photo"; return; }
-  ph.querySelector('img') && ph.querySelector('img').remove(); const im = new Image(); im.src = URL.createObjectURL(doneBlob); ph.prepend(im); ph.querySelector('span').textContent = '';
-};
-$('dSave').onclick = async e => {
-  if (!doneIt) return; const it = { ...doneIt, done: true, dd: $('dDate').value || today(), dn: $('dNote').value.trim(), doneBy: me() };
-  if (doneBlob) { const k = NS + 'p' + rid(12); await phPut(k, doneBlob); urls[k] = URL.createObjectURL(doneBlob); setQueue([...queue(), k]); it.p = k; }
-  const wasDone = doneIt.done; haptic(); closeSheet();
-  const r = e.target.getBoundingClientRect(); const el = document.querySelector(`.item[data-id="${CSS.escape(it.id)}"]`);
-  if (!wasDone) { hearts(window.innerWidth / 2, window.innerHeight * 0.55, 18); if (el) { el.querySelector('.check').classList.add('on'); el.querySelector('.check').innerHTML = icon('check'); el.classList.add('out'); } }
-  setTimeout(() => { touch(it); if (!wasDone) toast('Done together! ❤️'); }, wasDone ? 0 : 420);
+async function pickPhoto(ev) {
+  const f = ev.target.files[0]; if (!f) return; busyPhoto = true;
+  $('dShot').innerHTML = '<span class="spin"></span>';
+  try { doneBlob = await compress(f); shotShow(URL.createObjectURL(doneBlob)); haptic(); } catch (e) { doneBlob = null; shotEmpty(); toast("Couldn't use that photo"); }
+  busyPhoto = false; doneBtn();
+}
+async function storePhoto(blob) { const k = NS + 'p' + rid(12); await phPut(k, blob); urls[k] = URL.createObjectURL(blob); setQueue([...queue(), k]); return k; }
+$('dEdit').onclick = () => { const it = doneIt; closeSheet(); setTimeout(() => openEdit(it), 10); };
+$('dSave').onclick = async () => {
+  if (!doneIt || busyPhoto) return; const wasDone = doneIt.done;
+  const it = { ...doneIt, done: true, dd: $('dDate').value || today(), dn: $('dNote').value.trim(), doneBy: doneIt.doneBy || me() };
+  if (doneBlob) it.p = await storePhoto(doneBlob);
+  haptic(); closeSheet();
+  if (wasDone) { touch(it); if (viewIt) openView(it); return; }
+  const el = document.querySelector(`.item[data-id="${CSS.escape(it.id)}"]`);
+  if (el) { const c = el.querySelector('.check'); c.classList.add('on'); c.innerHTML = icon('check'); const r = c.getBoundingClientRect(); hearts(r.left + r.width / 2, r.top, 12); setTimeout(() => el.classList.add('out'), 350); }
+  else hearts(innerWidth / 2, innerHeight / 2, 12);
+  setTimeout(() => { touch(it); toast(it.p ? 'Memory saved ❤️' : 'Done together ❤️'); }, el ? 800 : 0);
 };
 
+/* memory detail (add a photo later straight from here) */
 let viewIt = null;
 function openView(it) {
-  viewIt = it; $('vName').textContent = it.t; $('vWhen').textContent = (it.e || '') + '  ' + fmtDate(it.dd); $('vNote').textContent = it.dn || '';
-  const ph = $('vPh'); ph.innerHTML = esc(it.e || '💞'); if (it.p) photoURL(it.p).then(u => { if (u && viewIt === it) { const im = new Image(); im.src = u; ph.appendChild(im); } });
-  sheet('sView');
+  viewIt = it; $('vName').textContent = (it.e ? it.e + ' ' : '') + it.t; $('vWhen').textContent = fmtDate(it.dd); $('vNote').textContent = it.dn || ''; $('vNote').hidden = !it.dn;
+  const ph = $('vPh');
+  if (it.p) { ph.innerHTML = ''; photoURL(it.p).then(u => { if (u && viewIt === it) ph.innerHTML = `<img src="${u}" alt="">`; }); }
+  else { ph.innerHTML = `<span class="cam">${icon('camera')}</span><b>Add a photo of you two</b><input type="file" accept="image/*" id="vFile">`;
+    $('vFile').onchange = async ev => { const f = ev.target.files[0]; if (!f) return; ph.innerHTML = '<span class="spin" style="width:28px;height:28px;border-radius:50%;border:3px solid var(--soft2);border-top-color:var(--pink);animation:spin .8s linear infinite"></span>';
+      try { const blob = await compress(f); const k = await storePhoto(blob); const nu = { ...viewIt, p: k }; touch(nu); haptic(); openView(nu); toast('Photo added ❤️'); } catch (e) { toast("Couldn't use that photo"); openView(viewIt); } }; }
+  if (!openSheet || openSheet.id !== 'sView') sheet('sView');
 }
-$('vEdit').onclick = () => { const it = viewIt; closeSheet(); setTimeout(() => openDone(it), 200); };
-$('vUndo').onclick = () => { const it = { ...viewIt, done: false }; closeSheet(); touch(it); toast('Moved back to ideas'); };
+$('vEdit').onclick = () => { const it = viewIt; closeSheet(); setTimeout(() => openDone(it), 10); };
+$('vUndo').onclick = () => { const it = { ...viewIt, done: false }; viewIt = null; closeSheet(); touch(it); toast('Moved back to our list'); };
+$('sView').addEventListener('transitionend', () => { if (!$('sView').classList.contains('on')) viewIt = null; });
 
 /* ---------- events ---------- */
-function go(v) { view = v; document.querySelectorAll('nav .tb').forEach(b => b.classList.toggle('on', b.dataset.v === v)); document.querySelectorAll('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v)); $('scroller').scrollTo({ top: 0 }); }
+function fabState() { $('addBtn').classList.toggle('away', view !== 'list' || !live().length); }
+function go(v) { view = v; fabState(); if (v === 'dates') renderDates(); document.querySelectorAll('nav .tb').forEach(b => b.classList.toggle('on', b.dataset.v === v)); document.querySelectorAll('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v)); $('scroller').scrollTo({ top: 0 }); }
 document.querySelectorAll('nav .tb').forEach(b => b.onclick = () => { haptic(); if (view === b.dataset.v) $('scroller').scrollTo({ top: 0, behavior: 'smooth' }); else go(b.dataset.v); });
 $('addBtn').onclick = () => { haptic(); openEdit(null); };
-$('list').onclick = e => { const c = e.target.closest('[data-done]'); if (c) { haptic(); c.classList.add('on'); c.innerHTML = icon('check'); const it = DOC.items[c.dataset.done]; setTimeout(() => { c.classList.remove('on'); c.innerHTML = ''; openDone(it); }, 220); return; }
-  const r = e.target.closest('.item'); if (r) openEdit(DOC.items[r.dataset.id]); };
-$('chips').onclick = e => { const c = e.target.closest('[data-f]'); if (!c) return; haptic(); filter = c.dataset.f; render(); };
-$('grid').onclick = e => { const t = e.target.closest('[data-view]'); if (t) { haptic(); openView(DOC.items[t.dataset.view]); } };
+$('firstBtn').onclick = () => { haptic(); openEdit(null); };
+$('list').onclick = e => { const r = e.target.closest('.item'); if (!r) return; haptic(); const it = DOC.items[r.dataset.id];
+  if (e.target.closest('.check')) { const c = r.querySelector('.check'); c.classList.add('on'); c.innerHTML = icon('check'); setTimeout(() => { c.classList.remove('on'); c.innerHTML = ''; }, 500); }
+  openDone(it); };
+$('wall').onclick = e => { const t = e.target.closest('[data-view]'); if (t) { haptic(); openView(DOC.items[t.dataset.view]); } };
 document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
 window.addEventListener('focus', () => sync());
 window.addEventListener('online', () => sync());
@@ -242,17 +268,18 @@ setInterval(() => { if (!document.hidden) sync(); }, POLL_MS);
 
 /* ---------- lock ---------- */
 function lockErr(m) { $('lockErr').textContent = m; $('lockIn').classList.remove('shake'); void $('lockIn').offsetWidth; $('lockIn').classList.add('shake'); }
+function askName(msg) { $('pw').hidden = true; $('me').hidden = false; $('lockSub').textContent = msg; $('lockBtn').textContent = 'Continue'; }
 async function unlock() {
   const btn = $('lockBtn');
-  if (!$('nameF').hidden) { const n = $('me').value.trim(); if (!n) return lockErr('Type your name.'); localStorage.setItem('bl.me', n); return finishGate(); }
+  if (!$('me').hidden) { const n = $('me').value.trim(); if (!n) return lockErr('Type your name.'); localStorage.setItem('bl.me', n); $('me').blur(); return finishGate(); }
   const pw = $('pw').value; if (!pw.trim()) return lockErr('Type the passcode.');
   btn.disabled = true; btn.textContent = 'Unlocking…'; $('lockErr').textContent = '';
   let bits = null; try { bits = await derive(pw); const v = dec.decode(await decBytes(VERIFIER, await crypto.subtle.importKey('raw', bits.slice(0, 32), 'AES-GCM', false, ['decrypt']))); if (v !== 'bucket-ok') bits = null; } catch (e) { bits = null; }
   btn.disabled = false; btn.textContent = 'Unlock';
   if (!bits) { $('pw').select(); return lockErr("That passcode isn't right."); }
-  localStorage.setItem('bl.k', b64(bits)); await useBits(bits); $('pw').value = ''; $('pw').blur(); haptic();
-  if (!me()) { $('pw').parentNode.hidden = true; $('nameF').hidden = false; $('lockSub').textContent = "Unlocked 💕 What's your name? It shows on ideas you add."; btn.textContent = 'Continue'; setTimeout(() => $('me').focus(), 100); return; }
-  finishGate();
+  localStorage.setItem('bl.k', b64(bits)); await useBits(bits); $('pw').value = ''; haptic();
+  if (!me()) { askName("Unlocked 💕 What's your name?"); $('me').focus(); return; }
+  $('pw').blur(); finishGate();
 }
 function finishGate() { const g = $('lock'); g.classList.add('gone'); setTimeout(() => { g.hidden = true; g.classList.remove('gone'); }, 520); render(); sync(); }
 $('lockBtn').onclick = unlock;
@@ -263,7 +290,7 @@ $('me').addEventListener('keydown', e => { if (e.key === 'Enter') unlock(); });
 paintIcons(); loadLocal(); render();
 (async () => {
   const k = localStorage.getItem('bl.k');
-  if (k) { await useBits(unb64(k)); if (me()) { sync(); return; } $('pw').parentNode.hidden = true; $('nameF').hidden = false; $('lockSub').textContent = "What's your name? It shows on ideas you add."; $('lockBtn').textContent = 'Continue'; }
+  if (k) { await useBits(unb64(k)); if (me()) { sync(); return; } askName("What's your name?"); }
   $('lock').hidden = false;
 })();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
